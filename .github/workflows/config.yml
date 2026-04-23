@@ -59,29 +59,35 @@ jobs:
           restore-keys: |
             trades-db-
 
-      - name: Validate ET time window
+      - name: Run workflow
+        id: run
+        env:
+          # `workflow_dispatch` bypasses the time-window guard so you can
+          # always trigger a test run manually.
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
         run: |
           current_time=$(TZ="America/New_York" date +'%H:%M')
-          echo "Current ET Time: $current_time"
+          echo "Current ET time: $current_time"
           minutes=$((10#$(echo "$current_time" | cut -d: -f1)*60 + 10#$(echo "$current_time" | cut -d: -f2)))
-          # Allow 09:35-10:15 and 15:30-16:15 ET.
-          if ! (( (minutes >= 575 && minutes <= 615) || (minutes >= 930 && minutes <= 975) )); then
-            echo "Outside valid ET trading windows; exiting."
+          # Allow 09:35-10:15 ET and 15:30-16:15 ET windows.
+          if [ -z "$FORCE" ] && ! (( (minutes >= 575 && minutes <= 615) || (minutes >= 930 && minutes <= 975) )); then
+            echo "Outside valid ET trading window; skipping run."
             exit 0
           fi
-
-      - name: Run workflow
-        run: python trade_workflow.py
+          python trade_workflow.py
 
       - name: Save trades.db cache
-        if: always()
+        # Cache save is best-effort — a cache-server blip must not fail
+        # the run after the strategy script succeeded.
+        if: always() && hashFiles('trades.db') != ''
+        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: trades.db
           key: trades-db-${{ github.run_id }}
 
       - name: Upload trades.db as artifact
-        if: always()
+        if: always() && hashFiles('trades.db') != ''
         uses: actions/upload-artifact@v4
         with:
           name: trades-db-${{ github.run_id }}
