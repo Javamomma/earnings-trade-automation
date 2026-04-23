@@ -8,28 +8,51 @@ Always consult a professional financial advisor before making any investment dec
 """
 
 
+import argparse
+import os
+import time as _time
+import urllib.parse
+from datetime import datetime, timedelta, timezone
+
+import numpy as np
+import pandas as pd
 import requests
 import yfinance as yf
-from datetime import datetime, timedelta, timezone
-from scipy.interpolate import interp1d
-import numpy as np
-import threading
-import urllib.parse
-import os
-from dotenv import load_dotenv
-import argparse
-from alpaca_integration import get_alpaca_option_chain, init_alpaca_client
-from alpaca.data.historical.option import OptionHistoricalDataClient
-from alpaca.data.requests import OptionLatestQuoteRequest, OptionSnapshotRequest
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockLatestBarRequest, StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
 from alpaca.data.enums import DataFeed
-import pandas as pd
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.historical.option import OptionHistoricalDataClient
+from alpaca.data.requests import (
+    OptionSnapshotRequest,
+    StockBarsRequest,
+    StockLatestBarRequest,
+)
+from alpaca.data.timeframe import TimeFrame
+from dotenv import load_dotenv
+from scipy.interpolate import interp1d
 
-# Load environment variables from .env file
+from alpaca_integration import get_alpaca_option_chain, init_alpaca_client
+from config import SETTINGS
+from log import get_logger
+
 load_dotenv()
+log = get_logger(__name__)
 GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")
+
+
+def _http_get_json(url: str) -> dict:
+    """GET JSON with a timeout and a small retry loop."""
+    last_err: Exception | None = None
+    for attempt in range(SETTINGS.http_retries):
+        try:
+            resp = requests.get(url, timeout=SETTINGS.http_timeout_sec)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            last_err = e
+            log.warning("HTTP GET attempt %d failed for %s: %s", attempt + 1, url, e)
+            _time.sleep(2 ** attempt)
+    log.error("HTTP GET gave up for %s: %s", url, last_err)
+    return {}
 
 def filter_dates(dates):
     today = datetime.today().date()
@@ -128,13 +151,13 @@ def compute_recommendation(ticker):
         alpaca_success = False
         if option_chain:
             try:
-                print(f"[{ticker}] Attempting to use Alpaca option chain data")
+                log.info(f"[{ticker}] Attempting to use Alpaca option chain data")
                 exp_dates = sorted(option_chain.keys())
                 # apply 45-day window and drop 0DTE using filter_dates()
                 try:
                     exp_dates_filtered = filter_dates(exp_dates)
                 except ValueError:
-                    print(f"[{ticker}] Not enough option data from Alpaca")
+                    log.info(f"[{ticker}] Not enough option data from Alpaca")
                     return "Error: Not enough option data."
                 underlying_price = None
                 try:
@@ -144,14 +167,14 @@ def compute_recommendation(ticker):
                     bar_resp = stock_client.get_stock_latest_bar(StockLatestBarRequest(symbol_or_symbols=ticker))
                     if bar_resp and ticker.upper() in bar_resp:
                         underlying_price = bar_resp[ticker.upper()].close
-                        print(f"[{ticker}] Got current price from Alpaca: {underlying_price}")
+                        log.info(f"[{ticker}] Got current price from Alpaca: {underlying_price}")
                 except Exception as e:
-                    print(f"[{ticker}] Error getting Alpaca current price: {e}")
+                    log.info(f"[{ticker}] Error getting Alpaca current price: {e}")
                     pass
                 if underlying_price is None:
                     stock = yf.Ticker(ticker)
                     underlying_price = stock.history(period='1d')['Close'].iloc[0]
-                    print(f"[{ticker}] Using Yahoo for current price: {underlying_price}")
+                    log.info(f"[{ticker}] Using Yahoo for current price: {underlying_price}")
                 options_client = OptionHistoricalDataClient(
                     api_key=os.environ.get("APCA_API_KEY_ID"),
                     secret_key=os.environ.get("APCA_API_SECRET_KEY")
@@ -200,7 +223,7 @@ def compute_recommendation(ticker):
                 # Only accept Alpaca data if there are at least two expiries worth of IVs
                 if len(atm_iv) >= 2:
                     alpaca_success = True
-                    print(f"[{ticker}] Successfully retrieved Alpaca IV data for {len(atm_iv)} expiries")
+                    log.info(f"[{ticker}] Successfully retrieved Alpaca IV data for {len(atm_iv)} expiries")
                     # Calculate term structure from Alpaca IV data
                     today = datetime.today().date()
                     dtes = []
@@ -214,7 +237,7 @@ def compute_recommendation(ticker):
                     ts_slope_0_45 = (term_spline(45) - term_spline(dtes[0])) / (45-dtes[0])
                     
                     # Now that we have Alpaca IV data, calculate RV using Alpaca data too
-                    print(f"[{ticker}] Attempting to calculate RV using Alpaca price history...")
+                    log.info(f"[{ticker}] Attempting to calculate RV using Alpaca price history...")
                     try:
                         now_utc = datetime.now(timezone.utc)
                         end_dt = now_utc
@@ -242,7 +265,7 @@ def compute_recommendation(ticker):
                                     # Direct dictionary access (older style)
                                     ticker_data_list = bars_response[ticker]
                             except (KeyError, AttributeError) as e:
-                                print(f"[{ticker}] Error accessing bars data structure: {e}")
+                                log.info(f"[{ticker}] Error accessing bars data structure: {e}")
                                 
                             
                             if ticker_data_list:
@@ -265,31 +288,33 @@ def compute_recommendation(ticker):
                                     # Calculate RV using Yang-Zhang
                                     rv30 = yang_zhang(price_df)
                                     iv30_rv30 = term_spline(30) / rv30
-                                    print(f"[{ticker}] USING ALPACA FOR BOTH IV AND RV. IV30={term_spline(30):.4f}, RV30={rv30:.4f}, Ratio={iv30_rv30:.4f}")
+                                    log.info(f"[{ticker}] USING ALPACA FOR BOTH IV AND RV. IV30={term_spline(30):.4f}, RV30={rv30:.4f}, Ratio={iv30_rv30:.4f}")
                                     
                                     # Always use Yahoo for average volume calculation
-                                    print(f"[{ticker}] Fetching volume data from Yahoo Finance")
+                                    log.info(f"[{ticker}] Fetching volume data from Yahoo Finance")
                                     stock_yf = yf.Ticker(ticker)
                                     price_history = stock_yf.history(period='3mo')
                                     avg_volume = price_history['Volume'].rolling(30).mean().dropna().iloc[-1]
                                     
                                     expected_move = str(round(straddle / underlying_price * 100, 2)) + "%" if straddle else None
                                     
-                                    return {'avg_volume': avg_volume >= 1500000, 
-                                            'iv30_rv30': iv30_rv30 >= 1.25, 
-                                            'ts_slope_0_45': ts_slope_0_45 <= -0.00406, 
-                                            'expected_move': expected_move}
+                                    return {
+                                        'avg_volume': avg_volume >= SETTINGS.min_avg_volume,
+                                        'iv30_rv30': iv30_rv30 >= SETTINGS.min_iv30_rv30,
+                                        'ts_slope_0_45': ts_slope_0_45 <= SETTINGS.max_ts_slope_0_45,
+                                        'expected_move': expected_move,
+                                    }
                                 else:
-                                    print(f"[{ticker}] Not enough bars from Alpaca (need >= 30, got {len(bars_data)}). Falling back to Yahoo.")
+                                    log.info(f"[{ticker}] Not enough bars from Alpaca (need >= 30, got {len(bars_data)}). Falling back to Yahoo.")
                             else:
-                                print(f"[{ticker}] No bar data found in the Alpaca response. Falling back to Yahoo.")
+                                log.info(f"[{ticker}] No bar data found in the Alpaca response. Falling back to Yahoo.")
                     except Exception as e:
-                        print(f"[{ticker}] Error calculating RV from Alpaca data: {e}. Falling back to Yahoo.")
+                        log.info(f"[{ticker}] Error calculating RV from Alpaca data: {e}. Falling back to Yahoo.")
             except Exception as e:
-                print(f"[{ticker}] Alpaca option chain processing error: {e}")
+                log.info(f"[{ticker}] Alpaca option chain processing error: {e}")
 
         # Use Yahoo Finance for both IV and RV if Alpaca failed
-        print(f"[{ticker}] USING YAHOO FINANCE FOR BOTH IV AND RV CALCULATIONS")
+        log.info(f"[{ticker}] USING YAHOO FINANCE FOR BOTH IV AND RV CALCULATIONS")
         try:
             stock = yf.Ticker(ticker)
             if len(stock.options) == 0:
@@ -357,52 +382,54 @@ def compute_recommendation(ticker):
         price_history = stock.history(period='3mo')
         rv30 = yang_zhang(price_history)
         iv30_rv30 = term_spline(30) / rv30
-        print(f"[{ticker}] Yahoo IV30={term_spline(30):.4f}, RV30={rv30:.4f}, Ratio={iv30_rv30:.4f}")
+        log.info(f"[{ticker}] Yahoo IV30={term_spline(30):.4f}, RV30={rv30:.4f}, Ratio={iv30_rv30:.4f}")
         avg_volume = price_history['Volume'].rolling(30).mean().dropna().iloc[-1]
         expected_move = str(round(straddle / underlying_price * 100,2)) + "%" if straddle else None
-        return {'avg_volume': avg_volume >= 1500000, 'iv30_rv30': iv30_rv30 >= 1.25, 'ts_slope_0_45': ts_slope_0_45 <= -0.00406, 'expected_move': expected_move}
+        return {
+            'avg_volume': avg_volume >= SETTINGS.min_avg_volume,
+            'iv30_rv30': iv30_rv30 >= SETTINGS.min_iv30_rv30,
+            'ts_slope_0_45': ts_slope_0_45 <= SETTINGS.max_ts_slope_0_45,
+            'expected_move': expected_move,
+        }
     except Exception as e:
-        print(f"Error for {ticker}: {e}")
+        log.warning(f"Error for {ticker}: {e}")
         return f"Error: {e}"
         
 
+_EARNINGS_BASE_URL = (
+    "https://www.dolthub.com/api/v1alpha1/post-no-preference/earnings/master"
+)
+
+
+def _fetch_earnings_for(date_str: str) -> list[dict]:
+    query = (
+        f"SELECT * FROM `earnings_calendar` where date = '{date_str}' "
+        f"ORDER BY `act_symbol` ASC, `date` ASC LIMIT 1000;"
+    )
+    url = f"{_EARNINGS_BASE_URL}?q={urllib.parse.quote(query)}"
+    data = _http_get_json(url)
+    return [
+        {"act_symbol": row["act_symbol"], "when": row.get("when")}
+        for row in data.get("rows", [])
+        if "act_symbol" in row
+    ]
+
+
 def get_tomorrows_earnings():
-    # Determine next open market day using Alpaca clock; fallback to next calendar day
     client = init_alpaca_client()
+    next_open_date = None
     if client:
         try:
-            clock = client.get_clock()
-            next_open_date = clock.next_open.date()
-        except Exception:
-            next_open_date = (datetime.now() + timedelta(days=1)).date()
-    else:
+            next_open_date = client.get_clock().next_open.date()
+        except Exception as e:  # noqa: BLE001
+            log.warning("Alpaca clock lookup failed: %s", e)
+    if next_open_date is None:
         next_open_date = (datetime.now() + timedelta(days=1)).date()
-    tomorrow = next_open_date.strftime('%Y-%m-%d')
-    base_url = "https://www.dolthub.com/api/v1alpha1/post-no-preference/earnings/master"
-    query = f"SELECT * FROM `earnings_calendar` where date = '{tomorrow}' ORDER BY `act_symbol` ASC, `date` ASC LIMIT 1000;"
-    url = f"{base_url}?q={urllib.parse.quote(query)}"
-    response = requests.get(url)
-    data = response.json()
-    # Return a list of dicts with act_symbol and when
-    tickers = [
-        {'act_symbol': row['act_symbol'], 'when': row.get('when')}
-        for row in data.get('rows', []) if 'act_symbol' in row
-    ]
-    return tickers
+    return _fetch_earnings_for(next_open_date.strftime("%Y-%m-%d"))
+
 
 def get_todays_earnings():
-    today = datetime.now().strftime('%Y-%m-%d')
-    base_url = "https://www.dolthub.com/api/v1alpha1/post-no-preference/earnings/master"
-    query = f"SELECT * FROM `earnings_calendar` where date = '{today}' ORDER BY `act_symbol` ASC, `date` ASC LIMIT 1000;"
-    url = f"{base_url}?q={urllib.parse.quote(query)}"
-    response = requests.get(url)
-    data = response.json()
-    # Return a list of dicts with act_symbol and when
-    tickers = [
-        {'act_symbol': row['act_symbol'], 'when': row.get('when')}
-        for row in data.get('rows', []) if 'act_symbol' in row
-    ]
-    return tickers
+    return _fetch_earnings_for(datetime.now().strftime("%Y-%m-%d"))
 
 def main():
     parser = argparse.ArgumentParser()
@@ -413,7 +440,7 @@ def main():
     # Process AMC earnings for today
     todays = get_todays_earnings()
     amc_tickers = [t for t in todays if t.get('when') and 'after' in t['when'].lower()]
-    print("\n--- AMC Earnings (Today) ---")
+    log.info("--- AMC Earnings (Today) ---")
     results_amc = []
     for ticker in amc_tickers:
         try:
@@ -430,15 +457,15 @@ def main():
                 ):
                     results_amc.append({'ticker': symbol, 'result': result})
         except Exception as e:
-            print(f"Error for {ticker}: {e}")
+            log.warning(f"Error for {ticker}: {e}")
             continue
     for entry in results_amc:
-        print(entry)
+        log.info(entry)
 
     # Process BMO earnings for tomorrow
     tomorrows = get_tomorrows_earnings()
     bmo_tickers = [t for t in tomorrows if t.get('when') and 'before' in t['when'].lower()]
-    print("\n--- BMO Earnings (Tomorrow) ---")
+    log.info("--- BMO Earnings (Tomorrow) ---")
     results_bmo = []
     for ticker in bmo_tickers:
         try:
@@ -455,10 +482,10 @@ def main():
                 ):
                     results_bmo.append({'ticker': symbol, 'result': result})
         except Exception as e:
-            print(f"Error for {ticker}: {e}")
+            log.warning(f"Error for {ticker}: {e}")
             continue
     for entry in results_bmo:
-        print(entry)
+        log.info(entry)
 
 if __name__ == "__main__":
     main()
