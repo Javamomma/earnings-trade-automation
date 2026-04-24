@@ -335,8 +335,22 @@ def _open_trade_for(
     """Screen, size, and submit one calendar spread.
 
     Replaces the copy-pasted BMO and AMC blocks in the old workflow.
-    Returns None; fill callbacks push rows onto ``trade_fill_queue``.
+    Any per-ticker error is logged and swallowed so one bad symbol can't
+    take the whole scheduled run down.
     """
+    ticker = ticker_info.get("act_symbol", "?")
+    try:
+        _open_trade_for_inner(ticker_info, when_norm, earnings_date, sizing_equity)
+    except Exception as e:  # noqa: BLE001
+        log.exception("Error processing %s (%s): %s", ticker, when_norm, e)
+
+
+def _open_trade_for_inner(
+    ticker_info: dict,
+    when_norm: str,
+    earnings_date,
+    sizing_equity: float,
+):
     ticker = ticker_info["act_symbol"]
     if not is_time_to_open(earnings_date, when_norm):
         log.debug("%s: not in open window for %s", ticker, when_norm)
@@ -655,4 +669,13 @@ def run_trade_workflow():
 
 
 if __name__ == "__main__":
-    sys.exit(run_trade_workflow())
+    try:
+        sys.exit(run_trade_workflow())
+    except KeyboardInterrupt:
+        raise
+    except Exception:  # noqa: BLE001
+        # A true bug still exits non-zero so CI flags it, but we log the
+        # full traceback first so the failure mode is obvious from logs
+        # instead of requiring a re-run with PYTHONFAULTHANDLER.
+        log.exception("Unhandled exception in trade workflow")
+        sys.exit(1)
