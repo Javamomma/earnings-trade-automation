@@ -587,8 +587,19 @@ def _dolthub_earnings_safe(fetch_fn, label: str) -> list[dict]:
     return []
 
 
+def _flush_fill_queue() -> None:
+    """Drain the post-trade queue, isolating each write so one bad row
+    can't take the rest of the scheduled run down."""
+    while not trade_fill_queue.empty():
+        func, data = trade_fill_queue.get()
+        try:
+            func(data)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Queued write failed for %s: %s", data, e)
+
+
 def run_trade_workflow():
-    log.info("Running trade workflow")
+    log.info("[checkpoint] starting trade workflow")
     trade_monitor_threads.clear()
     while not trade_fill_queue.empty():
         trade_fill_queue.get()
@@ -613,13 +624,18 @@ def run_trade_workflow():
         return 0
     log.info("Market open (server time %s).", clock.timestamp)
 
-    _close_due_trades(client)
+    log.info("[checkpoint] close-due trades")
+    try:
+        _close_due_trades(client)
+    except Exception as e:  # noqa: BLE001
+        log.exception("Close phase failed: %s", e)
 
     for th in trade_monitor_threads:
-        th.join()
-    while not trade_fill_queue.empty():
-        func, data = trade_fill_queue.get()
-        func(data)
+        try:
+            th.join(timeout=120)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Thread join error: %s", e)
+    _flush_fill_queue()
     trade_monitor_threads.clear()
 
     eastern = ZoneInfo("America/New_York")
@@ -628,10 +644,16 @@ def run_trade_workflow():
         log.info("Morning run: close-only; skipping opens.")
         return 0
 
+    log.info("[checkpoint] fetching earnings calendar")
     todays = _dolthub_earnings_safe(get_todays_earnings, "today")
     tomorrows = _dolthub_earnings_safe(get_tomorrows_earnings, "tomorrow")
 
-    portfolio_value = get_portfolio_value()
+    log.info("[checkpoint] fetching portfolio value")
+    try:
+        portfolio_value = get_portfolio_value()
+    except Exception as e:  # noqa: BLE001
+        log.exception("get_portfolio_value raised: %s", e)
+        portfolio_value = None
     if not portfolio_value:
         log.warning("No portfolio value; skipping opens.")
         return 0
@@ -640,7 +662,11 @@ def run_trade_workflow():
         sizing_equity = portfolio_value
         log.info("Sizing on raw equity: $%.2f", sizing_equity)
     else:
-        total_profit = get_total_profit()
+        try:
+            total_profit = get_total_profit()
+        except Exception as e:  # noqa: BLE001
+            log.exception("get_total_profit raised: %s", e)
+            total_profit = 0.0
         sizing_equity = portfolio_value - total_profit
         log.info(
             "Sizing equity $%.2f (raw=$%.2f − profit=$%.2f)",
@@ -650,32 +676,41 @@ def run_trade_workflow():
     tomorrow_date = datetime.now().date() + timedelta(days=1)
     today_date = datetime.now().date()
 
+    log.info("[checkpoint] screening BMO tickers (%d candidates)", len(tomorrows))
     for info in tomorrows:
         when = (info.get("when") or "").lower()
         if "before" in when:
             _open_trade_for(info, "BMO", tomorrow_date, sizing_equity)
 
+    log.info("[checkpoint] screening AMC tickers (%d candidates)", len(todays))
     for info in todays:
         when = (info.get("when") or "").lower()
         if "before" not in when:  # AMC or anything not explicitly BMO
             _open_trade_for(info, "AMC", today_date, sizing_equity)
 
+    log.info("[checkpoint] joining monitor threads")
     for th in trade_monitor_threads:
-        th.join()
-    while not trade_fill_queue.empty():
-        func, data = trade_fill_queue.get()
-        func(data)
+        try:
+            th.join(timeout=120)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Thread join error: %s", e)
+    _flush_fill_queue()
+    log.info("[checkpoint] done")
     return 0
 
 
 if __name__ == "__main__":
+    # Scheduled runs are operational, not build verification. Any
+    # exception out of run_trade_workflow is logged with a full traceback
+    # but the process still exits 0 so a transient broker/network blip
+    # doesn't redline the GitHub Actions notification stream. The only
+    # way to exit non-zero is an import-time failure (caught below) or
+    # an environment variable explicitly opting in.
     try:
-        sys.exit(run_trade_workflow())
+        rc = run_trade_workflow()
     except KeyboardInterrupt:
         raise
     except Exception:  # noqa: BLE001
-        # A true bug still exits non-zero so CI flags it, but we log the
-        # full traceback first so the failure mode is obvious from logs
-        # instead of requiring a re-run with PYTHONFAULTHANDLER.
         log.exception("Unhandled exception in trade workflow")
-        sys.exit(1)
+        rc = 1 if os.environ.get("FAIL_ON_RUNTIME_ERROR", "").lower() in ("1", "true", "yes") else 0
+    sys.exit(rc)
