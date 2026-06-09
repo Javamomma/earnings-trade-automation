@@ -38,6 +38,16 @@ ATM_REGEX = re.compile(r"\b(at[- ]the[- ]market|atm offering|equity distribution
 _TICKER_MAP_CACHE: dict[str, str] | None = None
 
 
+@dataclass(frozen=True)
+class Filing:
+    ticker: str
+    form: str
+    filed: date
+    accession: str
+    description: str
+    is_dilutive: bool
+
+
 def _headers() -> dict[str, str]:
     return {"User-Agent": SETTINGS.sec_user_agent, "Accept": "application/json"}
 
