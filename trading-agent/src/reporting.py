@@ -84,7 +84,7 @@ def _frontmatter(d: date, lines: list[TickerLine]) -> str:
 
 def _summary_table(lines: list[TickerLine]) -> str:
     rows = [
-        "| Ticker | Px | Δ | RelVol | Priority | Notes |",
+        "| Ticker | Px | Δ | RelVol | Priority | Flags |",
         "| --- | ---:| ---:| ---:| ---:| --- |",
     ]
     for line in sorted(lines, key=lambda l: l.score.research_priority, reverse=True):

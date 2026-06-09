@@ -36,7 +36,13 @@ def _last_morning_scores(brief_date: date) -> dict[str, float]:
                 "WHERE brief_date = ? GROUP BY ticker",
                 (brief_date.isoformat(),),
             )
-            return {row[0]: float(row[1]) for row in cur.fetchall()}
+            # MAX returns NULL when the row's value was NULL — we ignore
+            # those rather than crashing on float(None).
+            return {
+                row[0]: float(row[1])
+                for row in cur.fetchall()
+                if row[0] is not None and row[1] is not None
+            }
     except sqlite3.Error as e:
         log.warning("score history read failed: %s", e)
         return {}

@@ -60,9 +60,19 @@ def fetch_one(ticker: str) -> PriceSnapshot:
         vol = int(latest["Volume"]) if latest["Volume"] else None
         avg30 = float(hist["Volume"].tail(30).mean()) if len(hist) >= 5 else None
         rel_vol = (vol / avg30) if vol and avg30 else None
+        # FastInfo's surface has shifted across yfinance versions — it's
+        # been a dict-like, an object with attrs, and a MutableMapping
+        # that raises KeyError instead of returning None. Try each shape
+        # rather than relying on .get().
         cap = None
         try:
-            cap = _safe_float(t.fast_info.get("market_cap"))
+            fi = t.fast_info
+            cap = _safe_float(getattr(fi, "market_cap", None))
+            if cap is None:
+                try:
+                    cap = _safe_float(fi["market_cap"])
+                except (KeyError, TypeError):
+                    cap = None
         except Exception:
             cap = None
         return PriceSnapshot(

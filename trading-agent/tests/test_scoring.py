@@ -176,3 +176,32 @@ class TestScoreTicker:
 def test_momentum_handles_partial_inputs(pct, rv):
     s = momentum_score(pct, rv)
     assert 0 <= s <= 100
+
+
+class TestSecTickerMapCache:
+    """Regression: previously @lru_cache poisoned the cache on a failed
+    network fetch so subsequent runs in the same process returned an
+    empty map forever."""
+
+    def test_failure_does_not_poison_cache(self, monkeypatch):
+        import requests
+        from src import sec_filings
+
+        sec_filings._reset_ticker_map_cache()
+
+        def boom(*a, **kw):
+            raise requests.RequestException("simulated outage")
+
+        monkeypatch.setattr(requests, "get", boom)
+        assert sec_filings._ticker_to_cik_map() == {}
+
+        class FakeResp:
+            def raise_for_status(self): pass
+            def json(self):
+                return {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple"}}
+
+        monkeypatch.setattr(requests, "get", lambda *a, **kw: FakeResp())
+        out = sec_filings._ticker_to_cik_map()
+        assert out == {"AAPL": "0000320193"}, "cache was poisoned by earlier failure"
+
+        sec_filings._reset_ticker_map_cache()

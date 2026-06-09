@@ -17,7 +17,6 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from functools import lru_cache
 from typing import Iterable
 
 import requests
@@ -34,24 +33,24 @@ PROSPECTUS_FORM_PREFIXES = ("424B",)  # 424B1 .. 424B5 etc.
 SHELF_DRAW_FORMS = {"FWP"}
 ATM_REGEX = re.compile(r"\b(at[- ]the[- ]market|atm offering|equity distribution)\b", re.I)
 
-
-@dataclass(frozen=True)
-class Filing:
-    ticker: str
-    form: str
-    filed: date
-    accession: str
-    description: str
-    is_dilutive: bool
+# Manual cache: lru_cache would poison the cache with an empty dict on
+# the first failed network call and never retry within the process.
+_TICKER_MAP_CACHE: dict[str, str] | None = None
 
 
 def _headers() -> dict[str, str]:
     return {"User-Agent": SETTINGS.sec_user_agent, "Accept": "application/json"}
 
 
-@lru_cache(maxsize=1)
 def _ticker_to_cik_map() -> dict[str, str]:
-    """Return {TICKER: 10-digit zero-padded CIK}."""
+    """Return {TICKER: 10-digit zero-padded CIK}.
+
+    Cached *only on success*. A failed fetch returns an empty dict but
+    leaves the cache unset so the next call will retry.
+    """
+    global _TICKER_MAP_CACHE
+    if _TICKER_MAP_CACHE is not None:
+        return _TICKER_MAP_CACHE
     try:
         r = requests.get(EDGAR_TICKERS_URL, headers=_headers(), timeout=SETTINGS.http_timeout)
         r.raise_for_status()
@@ -65,7 +64,14 @@ def _ticker_to_cik_map() -> dict[str, str]:
             out[row["ticker"].upper()] = str(row["cik_str"]).zfill(10)
         except (KeyError, TypeError, AttributeError):
             continue
+    _TICKER_MAP_CACHE = out
     return out
+
+
+def _reset_ticker_map_cache() -> None:
+    """Test helper — clear the manual cache."""
+    global _TICKER_MAP_CACHE
+    _TICKER_MAP_CACHE = None
 
 
 def _is_dilutive(form: str, description: str = "") -> bool:
