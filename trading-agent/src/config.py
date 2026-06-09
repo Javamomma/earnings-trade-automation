@@ -57,6 +57,10 @@ class Settings:
     priority_alert_threshold: float = float(os.environ.get("PRIORITY_ALERT_THRESHOLD", "70"))
     report_style: str = os.environ.get("REPORT_STYLE", "obsidian").lower()
     http_timeout: float = float(os.environ.get("HTTP_TIMEOUT", "20"))
+    # Reddit OAuth (app-only). Reddit now 403s unauthenticated .json scraping;
+    # set these (a free "script" app at reddit.com/prefs/apps) to use the API.
+    reddit_client_id: str | None = os.environ.get("REDDIT_CLIENT_ID") or None
+    reddit_client_secret: str | None = os.environ.get("REDDIT_CLIENT_SECRET") or None
 
     def reports_path(self) -> Path:
         p = REPO_ROOT / self.reports_dir

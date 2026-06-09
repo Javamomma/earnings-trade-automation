@@ -38,6 +38,21 @@ ATM_REGEX = re.compile(r"\b(at[- ]the[- ]market|atm offering|equity distribution
 _TICKER_MAP_CACHE: dict[str, str] | None = None
 
 
+@dataclass(frozen=True)
+class Filing:
+    """One SEC filing, with a precomputed dilution flag.
+
+    (Restored — the repo referenced this class but never defined it, which
+    broke `from src.sec_filings import Filing` in reporting.py.)
+    """
+    ticker: str
+    form: str
+    filed: date
+    accession: str
+    description: str = ""
+    is_dilutive: bool = False
+
+
 def _headers() -> dict[str, str]:
     return {"User-Agent": SETTINGS.sec_user_agent, "Accept": "application/json"}
 

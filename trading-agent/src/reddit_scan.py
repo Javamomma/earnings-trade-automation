@@ -51,9 +51,50 @@ class Mention:
     ticker: str
 
 
+_OAUTH_TOKEN: str | None = None
+_OAUTH_TRIED = False
+
+
+def _get_oauth_token() -> str | None:
+    """App-only OAuth token (client_credentials) for a reddit 'script' app.
+
+    Reddit now 403s unauthenticated .json scraping, so an app credential is
+    required. Cached per process. Returns None if creds are unset or the call
+    fails (callers then degrade to empty mentions).
+    """
+    global _OAUTH_TOKEN, _OAUTH_TRIED
+    if _OAUTH_TOKEN or _OAUTH_TRIED:
+        return _OAUTH_TOKEN
+    _OAUTH_TRIED = True
+    cid, secret = SETTINGS.reddit_client_id, SETTINGS.reddit_client_secret
+    if not cid or not secret:
+        return None
+    try:
+        r = requests.post(
+            "https://www.reddit.com/api/v1/access_token",
+            auth=(cid, secret),
+            data={"grant_type": "client_credentials"},
+            headers={"User-Agent": SETTINGS.reddit_user_agent},
+            timeout=SETTINGS.http_timeout,
+        )
+        r.raise_for_status()
+        _OAUTH_TOKEN = r.json().get("access_token")
+    except Exception as e:  # noqa: BLE001
+        log.warning("reddit OAuth token fetch failed: %s", e)
+        _OAUTH_TOKEN = None
+    return _OAUTH_TOKEN
+
+
 def _fetch_subreddit_listing(subreddit: str, listing: str = "new", limit: int = 100) -> list[dict]:
-    url = f"https://www.reddit.com/r/{subreddit}/{listing}.json?limit={limit}"
+    token = _get_oauth_token()
     headers = {"User-Agent": SETTINGS.reddit_user_agent}
+    if token:
+        url = f"https://oauth.reddit.com/r/{subreddit}/{listing}?limit={limit}"
+        headers["Authorization"] = f"bearer {token}"
+    else:
+        # Unauthenticated fallback — reddit usually 403s this now. Set
+        # REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET (free script app) to fix.
+        url = f"https://www.reddit.com/r/{subreddit}/{listing}.json?limit={limit}"
     try:
         r = requests.get(url, headers=headers, timeout=SETTINGS.http_timeout)
         if r.status_code == 429:
