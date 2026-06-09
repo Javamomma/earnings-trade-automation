@@ -1,0 +1,47 @@
+# Watchlists drive the daily brief. Tickers in `core` always render in the
+# report; tickers in `radar` are scanned for signals but only included in
+# the brief when their priority score exceeds the threshold in .env.
+#
+# `notes` and `tags` are passed through to Obsidian frontmatter on each
+# ticker section, so you can pivot reports from your vault.
+
+version: 1
+
+# Always show, regardless of score.
+core:
+  - ticker: SPY
+    notes: "Broad market reference"
+    tags: [index, reference]
+  - ticker: QQQ
+    notes: "Tech reference"
+    tags: [index, reference]
+
+# Scanned daily. Surfaced in the brief when scoring crosses thresholds.
+radar:
+  - ticker: NVDA
+    tags: [ai, megacap]
+  - ticker: AMD
+    tags: [ai, semi]
+  - ticker: PLTR
+    tags: [ai, meme]
+  - ticker: GME
+    tags: [meme, retail]
+  - ticker: AMC
+    tags: [meme, retail]
+  - ticker: TSLA
+    tags: [ev, meme]
+
+# Subreddits scanned for ticker mentions. Higher weights amplify scoring.
+reddit:
+  subreddits:
+    - name: wallstreetbets
+      weight: 1.0
+    - name: stocks
+      weight: 0.4
+    - name: investing
+      weight: 0.3
+    - name: pennystocks
+      weight: 0.6
+  # Window in hours for "fresh" mentions used in acceleration scoring.
+  fresh_window_hours: 6
+  baseline_window_hours: 72

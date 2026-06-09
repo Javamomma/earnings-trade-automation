@@ -70,6 +70,29 @@ python automation.py
 
 
 
+## Configuration
+
+All strategy, sizing, and ops knobs live in `config.py` and can be
+overridden with environment variables (see `.env.template`). Key ones:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `KELLY_FRACTION` | `0.06` | Fraction of sizing equity risked per trade |
+| `KELLY_USE_RAW_EQUITY` | `false` | `true` = standard Kelly on full equity; `false` = legacy principal-preserving mode |
+| `MIN_AVG_VOLUME` | `1500000` | 30-day avg volume screen |
+| `MIN_IV30_RV30` | `1.25` | Minimum IV/RV ratio |
+| `MAX_TS_SLOPE_0_45` | `-0.00406` | Maximum (most negative required) term-structure slope |
+| `MAX_CLOSE_DEBIT_MULTIPLE` | `1.0` | Cap on close-order debit as a multiple of the original open debit |
+| `COMMISSION_PER_CONTRACT` | `0.0` | Estimated per-contract fee used in realized-profit math |
+| `LOG_LEVEL` | `INFO` | Python logging level |
+
+## Evaluation notes
+
+See `EVALUATION.md` for a full writeup of the issues the recent
+refactor addressed (unbounded close-side chase, trades.db committed to
+git, missing timeouts, BMO/AMC duplication, etc.) and items that are
+still open.
+
 ## Disclaimer
 This software is provided solely for educational and research purposes. It is not intended to provide investment advice. The developers are not financial advisors and accept no responsibility for any financial decisions or losses resulting from the use of this software. Always consult a professional financial advisor before making any investment decisions.
 

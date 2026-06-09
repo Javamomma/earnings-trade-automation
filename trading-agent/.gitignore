@@ -1,0 +1,16 @@
+# Local state and secrets
+.env
+.venv/
+data/*.db
+data/*.db-journal
+data/cron.log
+
+# Generated reports — track structure with .gitkeep, ignore contents.
+reports/daily/*.md
+reports/weekly/*.md
+!reports/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
