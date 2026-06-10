@@ -17,7 +17,19 @@ from typing import Iterable
 
 
 def _clip(x: float, lo: float = 0.0, hi: float = 100.0) -> float:
+    # NaN guard first: min/max comparisons against NaN are order-dependent
+    # in Python, and min(hi, nan) returns hi — which silently turned
+    # NaN inputs into a perfect 100 score.
+    if x != x:  # NaN is the only value not equal to itself
+        return lo
     return max(lo, min(hi, x))
+
+
+def _clean(x: float | None) -> float | None:
+    """Map NaN to None so missing data scores as missing, not as huge."""
+    if x is None or x != x:
+        return None
+    return x
 
 
 def momentum_score(pct_change: float | None, relative_volume: float | None) -> float:
@@ -25,7 +37,10 @@ def momentum_score(pct_change: float | None, relative_volume: float | None) -> f
 
     The intent is "is this both moving and being watched?". A 5% move
     on 3x rel-vol scores higher than a 5% move on 0.5x rel-vol.
+    NaN inputs are treated as missing.
     """
+    pct_change = _clean(pct_change)
+    relative_volume = _clean(relative_volume)
     if pct_change is None and relative_volume is None:
         return 0.0
     move = abs(pct_change or 0.0)

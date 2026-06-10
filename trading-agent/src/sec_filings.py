@@ -30,7 +30,10 @@ EDGAR_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 
 DILUTIVE_FORMS = {"S-1", "S-1/A", "S-3", "S-3/A", "S-3ASR", "F-3", "F-3/A"}
 PROSPECTUS_FORM_PREFIXES = ("424B",)  # 424B1 .. 424B5 etc.
-SHELF_DRAW_FORMS = {"FWP"}
+# Forms that are only dilutive when the description carries ATM/offering
+# language: FWP (free-writing prospectus) and 8-K (where ATM programs
+# are typically announced).
+ATM_CONTEXT_FORMS = {"FWP", "8-K", "8-K/A"}
 ATM_REGEX = re.compile(r"\b(at[- ]the[- ]market|atm offering|equity distribution)\b", re.I)
 
 # Manual cache: lru_cache would poison the cache with an empty dict on
@@ -90,7 +93,7 @@ def _is_dilutive(form: str, description: str = "") -> bool:
         return True
     if any(form_u.startswith(p) for p in PROSPECTUS_FORM_PREFIXES):
         return True
-    if form_u in SHELF_DRAW_FORMS and ATM_REGEX.search(description or ""):
+    if form_u in ATM_CONTEXT_FORMS and ATM_REGEX.search(description or ""):
         return True
     return False
 
