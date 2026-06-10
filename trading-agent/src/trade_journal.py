@@ -58,6 +58,57 @@ CREATE TABLE IF NOT EXISTS score_history (
 );
 CREATE INDEX IF NOT EXISTS ix_score_history_ticker
     ON score_history(ticker, brief_date);
+
+-- Quality-stock workflow tables (Phase 2 of the agent).
+CREATE TABLE IF NOT EXISTS theses (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    ticker              TEXT NOT NULL,
+    direction           TEXT NOT NULL,         -- 'long' | 'short' | 'income'
+    setup               TEXT NOT NULL,
+    thesis              TEXT NOT NULL,
+    confirms            TEXT,
+    invalidates         TEXT,
+    invalidation_price  REAL,
+    invalidation_date   TEXT,
+    horizon_days        INTEGER,
+    conviction          INTEGER,
+    sizing_hint         TEXT,
+    status              TEXT NOT NULL DEFAULT 'active',
+    closed_at           TEXT,
+    close_reason        TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_theses_ticker_status
+    ON theses(ticker, status);
+
+CREATE TABLE IF NOT EXISTS proposals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposed_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    ticker          TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    rationale       TEXT NOT NULL,
+    structured_json TEXT,
+    invalidation    TEXT,
+    status          TEXT NOT NULL DEFAULT 'open',
+    reviewed_at     TEXT,
+    review_note     TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_proposals_ticker_status
+    ON proposals(ticker, status);
+
+CREATE TABLE IF NOT EXISTS outcomes (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    measured_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    subject_kind      TEXT NOT NULL,   -- 'thesis' | 'proposal'
+    subject_id        INTEGER NOT NULL,
+    days_elapsed      INTEGER NOT NULL,
+    price_at_open     REAL,
+    price_at_measure  REAL,
+    hit_invalidation  INTEGER,
+    notes             TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_outcomes_subject
+    ON outcomes(subject_kind, subject_id);
 """
 
 

@@ -22,8 +22,11 @@ from dataclasses import asdict
 from datetime import date
 
 from src.alerts import send_discord
+from src.buy_zones import evaluate_zones, triggered_zones
 from src.config import SETTINGS, Watchlists, load_watchlists
+from src.portfolio import load_buy_zones
 from src.prices import fetch_many as fetch_prices
+from src.proposals import list_open, propose
 from src.reddit_scan import summarize_mentions
 from src.reporting import (
     TickerLine,
@@ -127,12 +130,55 @@ def main() -> int:
         [{"ticker": l.ticker, **asdict(l.score)} for l in all_lines],
     )
 
+    # Quality-stock layer: silently check buy zones; any trigger turns
+    # into a Proposal in the journal. Discord only pings when triggers
+    # fired or research-priority threshold crossed.
+    try:
+        zones = load_buy_zones()
+        if zones:
+            checks = evaluate_zones(zones)
+            fired = triggered_zones(checks)
+            for c in fired:
+                propose(
+                    ticker=c.zone.ticker,
+                    kind="buy_zone_hit",
+                    rationale=(
+                        f"Buy zone fired: {c.zone.trigger_kind} {c.zone.trigger_value} "
+                        f"(observed {c.observed_value:.2f}). {c.zone.rationale}"
+                    ),
+                    structured={
+                        "trigger_kind": c.zone.trigger_kind,
+                        "trigger_value": c.zone.trigger_value,
+                        "observed_value": c.observed_value,
+                        "size_pct_of_portfolio": c.zone.size_pct_of_portfolio,
+                    },
+                    invalidation=(
+                        "Re-verify thesis is intact before sizing in; "
+                        "expand only if no dilutive filing in the past 30d."
+                    ),
+                )
+            if fired:
+                log.info("Buy-zone triggers fired: %s",
+                         ", ".join(c.zone.ticker for c in fired))
+    except Exception as e:  # noqa: BLE001
+        log.warning("buy-zone check raised: %s", e)
+
     alert_threshold = SETTINGS.priority_alert_threshold
     alerters = [l for l in visible if l.score.research_priority >= alert_threshold]
+    open_props = list_open()
+    bits = []
     if alerters:
-        send_discord(render_discord_summary(today, alerters))
+        bits.append(render_discord_summary(today, alerters))
+    if open_props:
+        bits.append(
+            f"\n**{len(open_props)} open proposal(s)** awaiting review "
+            f"— `python -m src.proposals list`"
+        )
+    if bits:
+        send_discord("\n".join(bits))
     else:
-        log.info("No tickers above alert threshold (%.1f).", alert_threshold)
+        log.info("No alerts to send (threshold %.1f, %d open proposals).",
+                 alert_threshold, len(open_props))
 
     log.info("Brief %d complete", brief_id)
     return 0

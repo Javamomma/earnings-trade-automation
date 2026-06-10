@@ -1,107 +1,148 @@
-# Roadmap: from scanner to research partner
+# Roadmap: research partner for modest, repeatable gains
 
-North star: an agent that acts like a disciplined research partner for
-**somewhat speculative assets** — it surfaces candidates, drafts a
-falsifiable thesis for each, tracks whether its own calls worked, and
-gets more useful as the journal grows. Modest, repeatable edge; not
-lottery tickets.
+**Charter:** an agent that thinks proactively, surfaces specific
+proposals with explicit invalidation criteria, and gets sharper as the
+journal grows. The human reviews and acts. No order placement. No
+broker API. The agent never trades — *together we act*.
 
-Hard constraint, unchanged: **no order placement, no brokerage APIs.**
-The human makes every trade. The agent's output is words and scores.
+**Target:** modest monthly gains from three levers on quality names:
+getting paid to wait (option income), buying quality on sale
+(pre-committed buy zones), and not bleeding (avoiding overtrading,
+dilution traps, theses that quietly died).
 
 ---
 
-## Phase 1 — Trust the data (mostly done)
+## Phase 0 — Data trust ✅ shipped
 
-The audit fixes landed: NaN guards in scoring and prices, Reddit
-pagination + corrected baseline math, ATM detection on 8-Ks, EDGAR
-cache fix, fixture-based integration tests (65 passing).
+NaN guards in `scoring` and `prices` (NaN no longer scores as
+perfect-100). Reddit pagination + corrected baseline math (the older
+divisor systematically inflated acceleration on busy subs). EDGAR
+ticker-map cache no longer poisons on a transient failure. ATM
+language detected on 8-Ks, not only FWPs. **65+ tests covering the
+audit fixes alone.**
 
-Remaining:
-- [ ] Golden-file test for `reporting.render_brief` so format drift is
-      caught in review, not in Obsidian.
-- [ ] On-disk HTTP cache (e.g. `requests-cache`, SQLite backend) so
-      repeat runs within an hour don't re-hit EDGAR/Reddit. Politeness
-      and speed.
-- [ ] Persist daily raw snapshots (prices, mentions, filings) to
-      `data/` — this is the future backtest corpus. Start capturing
-      now; cold-start is the enemy.
+## Phase 1 — Buy-zone sentinel ✅ shipped
 
-## Phase 2 — Signals that actually discriminate
+`config/buy_zones.yaml` declares standing buy interest with one of
+four trigger kinds: absolute price, % off 52-week high, trailing P/E
+ceiling, FCF-yield floor. The agent stays silent until a trigger
+fires, then writes a `proposals` row with rationale and an explicit
+invalidation. Inverted alerting: pings are rare and meaningful.
 
-Ordered by value-per-effort for speculative small/mid caps:
+Files: `portfolio.py`, `buy_zones.py`, `config/{holdings,buy_zones}.yaml`.
 
-1. **Liquidity floor (do first).** Dollar-volume and float screens so
-   the agent never pitches something untradeable. A great score on a
-   $40k/day name is a trap, not an idea. Add `min_dollar_volume` to
-   watchlist config; render a hard "untradeable" flag.
-2. **Catalyst calendar.** Earnings dates (the parent repo already
-   queries Dolthub's calendar — reuse it), FDA/PDUFA dates for biotech,
-   lockup expirations, index-rebalance dates. A thesis without a
-   catalyst is a hope. Score proximity: catalyst within 2 weeks boosts
-   priority.
-3. **Insider buying (Form 4).** The EDGAR plumbing already exists in
-   `sec_filings.py`. Cluster buys by officers/directors are one of the
-   few well-documented positive signals in small caps. Mirror image of
-   the dilution flag.
-4. **Short interest / borrow.** FINRA publishes short interest
-   bi-monthly; days-to-cover plus rising mentions is the squeeze
-   set-up the meme flag should distinguish from pure hype.
-5. **Reddit quality upgrades.** Author-diversity (10 mentions by 10
-   users ≠ 10 by 1 spammer), comment-level scanning, and a simple
-   pump-pattern flag (brand-new accounts, identical phrasing).
+## Phase 2 — Option-income assistant ✅ shipped
 
-## Phase 3 — The partner part: theses, not tickers
+The piece that produces a monthly cash cadence. Reuses the
+Yang-Zhang realized-vol math from the parent earnings bot, ported into
+`volatility.py` along with a small Black-Scholes kit (delta, assignment
+probability). `options_income.py` scans yfinance option chains for
+cash-secured puts on buy-zone tickers and covered calls on holdings,
+ranking by yield × IV-richness × liquidity, with explicit penalties
+for strikes that span an earnings date. Ideas surface as proposals,
+never trades.
 
-This is the core of the ask. A ranked table is a scanner; a partner
-explains *why* and *what would change its mind*.
+Files: `volatility.py`, `options_income.py`. Tests in
+`tests/test_volatility.py` and `tests/test_options_income.py`.
 
-1. **Thesis composer.** For every ticker above the alert threshold,
-   generate a structured thesis block in the brief:
-   - *Setup*: which signals fired (momentum, accel, insider, catalyst)
-   - *Thesis*: one paragraph, template-driven from the signals
-   - *Confirms*: what evidence would strengthen it
-   - *Invalidates*: explicit kill criteria (price level, filing event,
-     mention collapse)
-   - *Risk flags*: dilution, meme, liquidity — restated, never buried
-   Start template-based (deterministic, testable). Optionally add an
-   LLM pass (Claude API) that drafts the narrative from the structured
-   inputs — the journal becomes its memory: feed it prior theses on
-   the same name and their outcomes.
-2. **Outcome scoring (the feedback loop).** Nightly job marks every
-   journaled hypothesis after N days: did price confirm or hit the
-   invalidation first? Write hit-rate by signal combination into the
-   weekly report. This is what separates a partner from a horoscope —
-   and it generates the labels needed to tune `scoring.py` weights on
-   evidence instead of vibes.
-3. **Weekly review** (`reports/weekly/`). Biggest movers vs. what the
-   agent scored them; misses analyzed; journal post-mortems due; the
-   current hit-rate table. The Sunday-evening read.
-4. **Two-way journal CLI.** `python -m src.journal add GME --direction
-   long --thesis "..." --invalidation "..."` so capturing your own
-   ideas is frictionless; the agent then tracks *your* calls with the
-   same outcome scoring as its own. Over time you learn which of you
-   is right more often, per signal type.
+## Phase 3 — Filings deltas ✅ shipped
 
-## Phase 4 — Ops hardening
+`filings_diff.py` pulls the two most recent 10-Q/10-K for each
+holding, extracts Risk Factors and MD&A sections, and diffs them at
+the paragraph level (90% similarity fuzz-match to ignore boilerplate
+shuffles). Material additions become a proposal. **The single
+biggest research time-saver in the system** — read the new paragraphs,
+skip the 100-page filing.
 
-- Pi watchdog (sketched in README): alert when today's brief is
-  missing. One-file script, SSH + Discord.
-- launchd plists instead of cron on the Mac mini (survives reboots,
-  no env-stripping surprises).
-- SQLite backup: nightly copy of `journal.db` to `data/backups/`,
-  rotate 30.
-- A `--dry-run` flag for `generate_brief` that writes to stdout and
-  skips Discord — for safe iteration.
+## Phase 4 — Thesis ledger ✅ shipped
 
-## Calibration discipline (applies throughout)
+Every position or proposal carries a falsifiable thesis with
+explicit invalidation criteria — price level, calendar date, or
+horizon. `theses.py` provides CRUD plus `check_invalidations()` which
+returns active theses whose kill criteria fired today. **The agent
+proposes the close; it does not close.**
 
-- Every new signal ships with: a pure scoring function, unit tests,
-  and a column in `score_history` — so its contribution is measurable
-  and removable.
-- Re-weight `research_priority` only against journaled outcomes, never
-  by eyeballing one week.
-- The meme/dilution/liquidity flags must stay *subtractive*. The
-  agent's job on speculative names is mostly to say "no, and here's
-  why" — the modest-gain goal dies on the names it should have
-  filtered.
+## Phase 5 — Proposals as first-class output ✅ shipped
+
+`proposals.py` is the agent's actionable surface. Every recommendation
+flows through this table with kind ∈ {`buy_zone_hit`, `csp`, `cc`,
+`exit`, `thesis_invalidation`, `filings_delta`}, structured payload
+(strikes, expiries, observed values), rationale, and invalidation.
+CLI:
+
+```bash
+python -m src.proposals list                # open queue
+python -m src.proposals list --recent 30    # last 30 days, any status
+python -m src.proposals review --id N --action accepted --note "..."
+```
+
+## Phase 6 — Outcome scoring (the feedback loop) ✅ shipped
+
+`outcomes.py` runs nightly and records for every active thesis older
+than 7 days: current price, whether the invalidation level fired, and
+days elapsed. `hit_rate_summary()` aggregates by signal/kind into the
+weekly report. This is what turns "score weights" from guesses into
+evidence — and it's what separates a partner from a horoscope.
+
+## Phase 7 — Sunday brief ✅ shipped
+
+`generate_weekly.py` orchestrates all of the above into one 10-minute
+read every Sunday evening:
+
+1. Portfolio table — holdings, weights, week move, unrealized P/L
+2. Buy-zone triggers fired this week
+3. Top option-income ideas (CSPs on cash-targets, CCs on holdings)
+4. Filings deltas on holdings
+5. Theses approaching invalidation / hit invalidation
+6. Hit-rate summary across the whole journal
+7. Open proposals awaiting decision
+
+## Phase 8 — Quality screen ✅ shipped
+
+`quality.py` is the inverse of the speculative flags from the radar
+list — it *rewards* persistence: high ROIC, FCF yield, *shrinking*
+share count (anti-dilution), stable operating margins, low leverage.
+Run monthly to refresh the watchlist that feeds buy-zones and
+option-income.
+
+## Phase 9 — Ops hardening (in progress)
+
+Done:
+- `proposals` CLI for review workflow.
+- Tests isolate the SQLite journal in tmp_path.
+
+To do:
+- [ ] Pi watchdog: alert if today's brief is missing.
+- [ ] launchd plists for the Mac mini (survives reboots cleanly).
+- [ ] Nightly backup of `journal.db` to `data/backups/`, rotate 30.
+- [ ] `--dry-run` flag on briefs that suppresses Discord and journal
+      writes.
+- [ ] On-disk HTTP cache (requests-cache) for EDGAR + Reddit so repeat
+      runs within an hour don't re-hit upstream.
+
+## Phase 10 — Calibration (continuous)
+
+Now that outcomes are journaled, re-weight `scoring.py` against
+evidence rather than vibes. The agreement is: never re-weight on one
+week's data. Quarterly review of `hit_rate_summary()` decides what to
+keep, demote, or kill.
+
+---
+
+## Design conventions baked in
+
+1. **Agent proposes, together we act.** Every output is a Proposal
+   with rationale + invalidation. The human reviews via CLI. Nothing
+   else.
+2. **Quiet by default.** Discord and email pings only on genuinely
+   actionable events. The summary table at the top of the brief is
+   silent; only triggers and threshold crossings ping.
+3. **Pure scoring, separable fetching.** Every module has a pure-
+   function core and a thin I/O boundary, so audits and tests can
+   exercise the logic without the network.
+4. **Subtractive flags first.** The dilution / earnings-span / meme
+   flags reduce scores; the cheap-FCF / buyback flags raise them. We
+   defend before we attack on speculative names; we accumulate
+   before we chase on quality names.
+5. **Every signal carries an explicit invalidation.** No silent
+   abandonment. If a thesis dies, the journal says when and why.

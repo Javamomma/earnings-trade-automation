@@ -6,28 +6,56 @@ mentions, scores everything, writes an Obsidian-friendly Markdown
 brief, and pings Discord. It **never places orders**, has no broker
 SDK, and does not authenticate with any brokerage.
 
+## Core idea
+
+**Agent proposes, together we act.** Every recommendation flows
+through a `proposals` table with rationale + explicit invalidation.
+Discord pings rarely. You review proposals with a CLI and mark each
+`accepted` / `rejected` / `deferred`. Outcomes are journaled and
+later aggregated into a hit-rate table that calibrates the next
+generation of scoring weights.
+
 ## What it does
 
-1. Reads `config/watchlists.yaml`.
-2. For each ticker, fetches price, daily change, volume, and 30-day
-   relative volume (yfinance).
-3. Pulls recent SEC filings via EDGAR and flags S-1 / S-3 / 424B /
-   ATM-language as dilution risk.
-4. Scans Reddit JSON endpoints for ticker mentions across the
-   configured subreddits, computes a fresh-vs-baseline acceleration
-   ratio.
-5. Scores each ticker on five axes:
-   - momentum (price move × relative volume)
-   - reddit acceleration (fresh / baseline mention rate)
-   - dilution risk (recent dilutive filings)
-   - meme risk (tag + reddit volume)
-   - **research priority** (weighted blend, 0-100)
-6. Writes `reports/daily/YYYY-MM-DD-morning-brief.md` with frontmatter,
-   summary table, and per-ticker sections.
-7. Posts a top-N Discord summary when any ticker crosses
-   `PRIORITY_ALERT_THRESHOLD`.
-8. Stores every brief and every per-ticker score row in a local SQLite
-   journal (`data/journal.db`).
+### Daily — morning brief (`generate_brief.py`)
+1. Reads `config/watchlists.yaml` (speculative radar).
+2. Fetches price, change, volume, 30-day relative volume via yfinance.
+3. Pulls recent SEC filings; flags S-1 / S-3 / 424B / ATM language as
+   dilution risk.
+4. Scans Reddit's public JSON endpoints (paginated) for mention
+   acceleration vs. baseline.
+5. Scores each ticker on momentum / reddit / dilution / meme / final
+   research-priority.
+6. Silently checks `config/buy_zones.yaml`; any trigger fires a
+   `Proposal` row.
+7. Writes `reports/daily/YYYY-MM-DD-morning-brief.md`.
+8. Pings Discord only when priority threshold crossed or open
+   proposals exist.
+
+### Weekly — Sunday brief (`generate_weekly.py`)
+1. Portfolio table: holdings, weights, week-over-week move, unrealized
+   P/L.
+2. Buy-zone triggers fired this week.
+3. Option-income ideas — cash-secured puts on buy-zone tickers, covered
+   calls on holdings — ranked by yield × IV-richness × liquidity, with
+   earnings-span penalties.
+4. Filings deltas: paragraph-level diffs of 10-Q/10-K Risk Factors and
+   MD&A against the prior filing. Read the new paragraphs, skip the
+   document.
+5. Theses approaching invalidation / hit invalidation.
+6. Hit-rate summary across the whole journal (the feedback loop).
+7. Open proposals awaiting decision.
+
+### Nightly — outcomes (`outcomes.py`)
+For every active thesis older than 7 days, records current price,
+whether invalidation level fired, and days elapsed.
+
+### Always — proposals CLI
+```bash
+python -m src.proposals list                    # open queue
+python -m src.proposals list --recent 30        # last 30d any status
+python -m src.proposals review --id N --action accepted --note "..."
+```
 
 ## What it does NOT do
 
@@ -43,24 +71,43 @@ trading system.
 
 ```
 trading-agent/
-  config/watchlists.yaml      <- tickers + reddit subreddits
-  data/                       <- SQLite journal lives here
-  reports/daily/              <- generated briefs (Markdown)
-  reports/weekly/             <- reserved for future weekly summaries
+  config/
+    watchlists.yaml      speculative radar + core
+    holdings.yaml        what you own (so the agent can reason)
+    buy_zones.yaml       standing buy interest
+  data/                  SQLite journal (gitignored)
+  reports/
+    daily/               morning briefs
+    weekly/              Sunday briefs
   src/
-    config.py                 <- env + YAML loaders
-    prices.py                 <- yfinance wrappers
-    sec_filings.py            <- SEC EDGAR + dilution heuristics
-    reddit_scan.py            <- reddit JSON scrape + acceleration
-    scoring.py                <- pure scoring (fully unit-tested)
-    reporting.py              <- Markdown renderer (Obsidian style)
-    alerts.py                 <- Discord webhook
-    trade_journal.py          <- SQLite journal
-    generate_brief.py         <- morning entry point
-    intraday_scan.py          <- intraday refresh entry point
-  tests/                      <- pytest scoring tests
-  requirements.txt
-  .env.example
+    # data layer
+    prices.py            yfinance OHLCV snapshots
+    sec_filings.py       EDGAR + dilution heuristics
+    filings_diff.py      Risk Factors / MD&A diffs across filings
+    reddit_scan.py       reddit JSON pagination + acceleration math
+    portfolio.py         holdings + buy-zone YAML loaders
+    volatility.py        Yang-Zhang RV + Black-Scholes delta
+    # signals
+    scoring.py           speculative scoring (5 pure functions)
+    quality.py           quality screen (the inverse of speculative)
+    buy_zones.py         silent-until-triggered sentinel
+    options_income.py    CSP + CC ranker
+    # agent surface
+    theses.py            CRUD + invalidation checker
+    proposals.py         agent's actionable output + review CLI
+    outcomes.py          nightly hit/miss recorder (feedback loop)
+    # orchestration
+    config.py            env + YAML loaders
+    log.py               project logger
+    alerts.py            Discord webhook
+    reporting.py         Markdown renderer (Obsidian frontmatter)
+    trade_journal.py     SQLite schema + connection helper
+    generate_brief.py    morning entry point
+    generate_weekly.py   Sunday entry point
+    intraday_scan.py     cheap intraday refresh
+  tests/                 ~125 tests, all network-free
+  ROADMAP.md             phased plan + design conventions
+  README.md
 ```
 
 ## Setup on macOS (Mac mini)
@@ -100,12 +147,29 @@ America/New_York` if needed).
 
 ```cron
 # Morning brief — pre-market, after most pre-open headlines have hit.
-30 8 * * 1-5 cd /Users/you/trading-agent && /Users/you/trading-agent/.venv/bin/python -m src.generate_brief >> data/cron.log 2>&1
+30 8 * * 1-5 cd /Users/you/trading-agent && .venv/bin/python -m src.generate_brief >> data/cron.log 2>&1
 
 # Intraday refresh — early afternoon and end-of-day.
-0 13 * * 1-5 cd /Users/you/trading-agent && /Users/you/trading-agent/.venv/bin/python -m src.intraday_scan >> data/cron.log 2>&1
-30 15 * * 1-5 cd /Users/you/trading-agent && /Users/you/trading-agent/.venv/bin/python -m src.intraday_scan >> data/cron.log 2>&1
+0 13 * * 1-5 cd /Users/you/trading-agent && .venv/bin/python -m src.intraday_scan >> data/cron.log 2>&1
+30 15 * * 1-5 cd /Users/you/trading-agent && .venv/bin/python -m src.intraday_scan >> data/cron.log 2>&1
+
+# Sunday brief — 9pm ET so it's waiting Sunday night.
+0 21 * * 0 cd /Users/you/trading-agent && .venv/bin/python -m src.generate_weekly >> data/cron.log 2>&1
+
+# Nightly outcome scoring — closes the feedback loop.
+30 22 * * * cd /Users/you/trading-agent && .venv/bin/python -m src.outcomes >> data/cron.log 2>&1
 ```
+
+## Daily workflow
+
+1. **Morning, 8:30am ET:** brief lands in `reports/daily/`. Optional
+   Discord ping if anything crossed thresholds.
+2. **Whenever:** `python -m src.proposals list` — what's the agent
+   thinking? Each row carries rationale + explicit invalidation.
+3. **You decide and act** (in your broker). Then:
+   `python -m src.proposals review --id N --action accepted --note "..."`.
+4. **Sunday, 9pm ET:** weekly brief — portfolio review, filings
+   deltas, hit-rate update. 10-minute read.
 
 If you prefer launchd, drop `~/Library/LaunchAgents/com.you.trading-agent.plist`
 with the equivalent `StartCalendarInterval` blocks — launchd survives

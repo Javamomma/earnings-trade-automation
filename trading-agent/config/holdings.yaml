@@ -1,0 +1,38 @@
+# Current positions. The agent reads this to compute portfolio-level
+# stats (weights, concentration), to suggest covered calls only on
+# names you actually own, and to suppress buy-zone alerts on names
+# already at your target weight.
+#
+# This file lives in version control because it's *config*, not state.
+# Realized P&L belongs in the SQLite journal, not here.
+
+holdings:
+  # Example — replace with your actual positions.
+  - ticker: MSFT
+    shares: 50
+    cost_basis: 380.00
+    opened_at: 2025-01-15
+    notes: "Core compounder; target weight 8%"
+
+  - ticker: BRK-B
+    shares: 30
+    cost_basis: 410.00
+    opened_at: 2024-11-02
+    notes: "Permanent hold"
+
+  - ticker: COST
+    shares: 10
+    cost_basis: 740.00
+    opened_at: 2024-08-19
+    notes: "Consumer staple compounder"
+
+cash:
+  amount: 25000
+  notes: "Reserved for buy-zone strikes"
+
+targets:
+  # Total portfolio target weights per ticker. Used to suppress
+  # buy-zone alerts when a position is already at target.
+  MSFT: 0.10
+  BRK-B: 0.10
+  COST: 0.05

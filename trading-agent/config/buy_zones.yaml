@@ -1,0 +1,37 @@
+# Standing buy interest. The agent watches these silently and only
+# proposes action when a trigger fires. The point is *inverted alerting*
+# — pings are rare, so when one comes through, it matters.
+#
+# Trigger kinds:
+#   price            absolute price level
+#   pct_off_high     percent off 52-week high (e.g. 15 = "15% off ATH")
+#   pe_below         trailing P/E below threshold (yfinance)
+#   fcf_yield_above  free-cash-flow yield above threshold (decimal: 0.05 = 5%)
+#
+# size_pct_of_portfolio is what you'd target on a full fill; the agent
+# uses it to size proposed cash-secured-put strikes inside the zone.
+
+zones:
+  - ticker: MSFT
+    trigger_kind: pct_off_high
+    trigger_value: 15
+    size_pct_of_portfolio: 0.04
+    rationale: "Compounder at a 15% discount has historically been a good entry"
+
+  - ticker: GOOGL
+    trigger_kind: pe_below
+    trigger_value: 20
+    size_pct_of_portfolio: 0.05
+    rationale: "Premium business at a market-multiple is rare"
+
+  - ticker: COST
+    trigger_kind: pct_off_high
+    trigger_value: 20
+    size_pct_of_portfolio: 0.03
+    rationale: "Quality rarely goes on sale; size up only on real drawdowns"
+
+  - ticker: V
+    trigger_kind: price
+    trigger_value: 250.00
+    size_pct_of_portfolio: 0.04
+    rationale: "Network-effect monopoly; below 250 is structural buy"
