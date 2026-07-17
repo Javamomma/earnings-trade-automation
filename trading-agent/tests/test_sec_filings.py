@@ -22,16 +22,23 @@ TICKER_FIXTURE = {
     "1": {"cik_str": 1640147, "ticker": "MULN", "title": "Mullen Automotive"},
 }
 
+# Fixture dates are generated relative to today so the tests never age
+# out of the lookback window (a hardcoded-date version broke two months
+# after it was written).
+from datetime import date, timedelta
+
+
+def _d(days_ago: int) -> str:
+    return (date.today() - timedelta(days=days_ago)).isoformat()
+
+
 # Real shape of https://data.sec.gov/submissions/CIK#########.json,
 # trimmed to the fields we actually consume.
 AAPL_FIXTURE = {
     "filings": {
         "recent": {
             "form": ["10-Q", "8-K", "4", "10-K", "DEF 14A"],
-            "filingDate": [
-                "2026-05-01", "2026-04-25", "2026-04-20",
-                "2026-03-15", "2026-02-10",
-            ],
+            "filingDate": [_d(10), _d(20), _d(30), _d(60), _d(90)],
             "accessionNumber": ["b1", "b2", "b3", "b4", "b5"],
             "primaryDocDescription": [
                 "Quarterly report",
@@ -46,13 +53,15 @@ AAPL_FIXTURE = {
 
 # A textbook dilutive small-cap pattern: shelf S-3 plus multiple 424B
 # prospectus draws plus an FWP carrying ATM-offering language.
+MULN_MOST_RECENT_DILUTIVE_DATE = _d(15)
 MULN_FIXTURE = {
     "filings": {
         "recent": {
             "form": ["8-K", "S-3", "424B5", "FWP", "10-Q", "424B5"],
             "filingDate": [
-                "2026-06-05", "2026-05-28", "2026-05-28",
-                "2026-05-15", "2026-05-10", "2026-04-30",
+                _d(5), MULN_MOST_RECENT_DILUTIVE_DATE,
+                MULN_MOST_RECENT_DILUTIVE_DATE,
+                _d(30), _d(35), _d(45),
             ],
             "accessionNumber": ["a1", "a2", "a3", "a4", "a5", "a6"],
             "primaryDocDescription": [
@@ -125,7 +134,7 @@ def test_dilutive_smallcap_flags_correctly():
     # S-3 + two 424B5 + FWP-with-ATM-language = 4 dilutive items.
     assert summary["count"] == 4
     assert summary["most_recent_form"] in {"S-3", "424B5"}
-    assert summary["most_recent_date"] == "2026-05-28"
+    assert summary["most_recent_date"] == MULN_MOST_RECENT_DILUTIVE_DATE
 
 
 def test_filing_dataclass_exists_and_is_constructable():

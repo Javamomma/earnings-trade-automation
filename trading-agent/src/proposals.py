@@ -33,6 +33,8 @@ class Proposal:
     proposed_at: str | None = None
     reviewed_at: str | None = None
     review_note: str | None = None
+    agent_analysis: str | None = None   # headless evaluator's writeup
+    agent_stance: str | None = None     # 'endorse' | 'caution' | 'oppose'
 
 
 def propose(
@@ -89,6 +91,20 @@ def review(proposal_id: int, action: str, note: str = "") -> None:
         )
 
 
+def annotate(proposal_id: int, analysis: str, stance: str | None = None) -> None:
+    """Attach the model's evaluation to a proposal WITHOUT changing its
+    status. This is the only write the headless evaluator is allowed:
+    stance is an opinion ('endorse' | 'caution' | 'oppose'), never a
+    decision. Status transitions stay human-owned via ``review``."""
+    if stance is not None and stance not in ("endorse", "caution", "oppose"):
+        raise ValueError(f"unknown stance {stance!r}")
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE proposals SET agent_analysis = ?, agent_stance = ? WHERE id = ?",
+            (analysis, stance, proposal_id),
+        )
+
+
 def _row(d: dict[str, Any]) -> Proposal:
     structured = {}
     if d.get("structured_json"):
@@ -107,6 +123,8 @@ def _row(d: dict[str, Any]) -> Proposal:
         proposed_at=d.get("proposed_at"),
         reviewed_at=d.get("reviewed_at"),
         review_note=d.get("review_note"),
+        agent_analysis=d.get("agent_analysis"),
+        agent_stance=d.get("agent_stance"),
     )
 
 
@@ -121,11 +139,18 @@ def _cli() -> int:
     p_list.add_argument("--recent", type=int, default=0,
                         help="Show last N days (any status)")
 
-    p_review = sub.add_parser("review", help="Mark a proposal")
+    p_review = sub.add_parser("review", help="Mark a proposal (human decision)")
     p_review.add_argument("--id", type=int, required=True)
     p_review.add_argument("--action", required=True,
                           choices=["accepted", "rejected", "deferred", "expired"])
     p_review.add_argument("--note", default="")
+
+    p_annotate = sub.add_parser(
+        "annotate",
+        help="Attach model analysis to a proposal (no status change)")
+    p_annotate.add_argument("--id", type=int, required=True)
+    p_annotate.add_argument("--stance", choices=["endorse", "caution", "oppose"])
+    p_annotate.add_argument("--analysis", required=True)
 
     args = parser.parse_args()
     if args.cmd == "list":
@@ -140,10 +165,16 @@ def _cli() -> int:
                 print(f"      INVALIDATES: {p.invalidation}")
             if p.structured:
                 print(f"      DETAILS:     {json.dumps(p.structured)[:120]}")
+            if p.agent_stance or p.agent_analysis:
+                print(f"      AGENT [{p.agent_stance or '—'}]: {(p.agent_analysis or '')[:110]}")
         return 0
     if args.cmd == "review":
         review(args.id, args.action, args.note)
         print(f"proposal #{args.id} -> {args.action}")
+        return 0
+    if args.cmd == "annotate":
+        annotate(args.id, args.analysis, args.stance)
+        print(f"proposal #{args.id} annotated ({args.stance or 'no stance'})")
         return 0
     return 1
 

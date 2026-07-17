@@ -60,6 +60,38 @@ class TestProposalLifecycle:
             proposals.review(pid, "BOGUS")
 
 
+class TestAgentAnnotation:
+    """The headless evaluator's only write: annotate without touching
+    status. Also exercises the additive column migration."""
+
+    def test_annotate_preserves_status(self):
+        pid = proposals.propose("MSFT", "csp", "Sell 380p")
+        proposals.annotate(pid, "Aligned with buy zone; IV rich.", "endorse")
+        open_ = proposals.list_open()
+        assert len(open_) == 1, "annotation must not close the proposal"
+        assert open_[0].agent_stance == "endorse"
+        assert "IV rich" in open_[0].agent_analysis
+
+    def test_annotate_without_stance(self):
+        pid = proposals.propose("X", "cc", "y")
+        proposals.annotate(pid, "Needs more data.")
+        assert proposals.list_open()[0].agent_stance is None
+
+    def test_invalid_stance_rejected(self):
+        pid = proposals.propose("X", "cc", "y")
+        with pytest.raises(ValueError):
+            proposals.annotate(pid, "text", "strong_buy")
+
+    def test_review_after_annotation_keeps_analysis(self):
+        pid = proposals.propose("MSFT", "csp", "Sell 380p")
+        proposals.annotate(pid, "Good setup.", "endorse")
+        proposals.review(pid, "accepted", note="done")
+        recent = proposals.list_recent(days=7)
+        assert recent[0].status == "accepted"
+        assert recent[0].agent_stance == "endorse"
+        assert recent[0].agent_analysis == "Good setup."
+
+
 class TestThesisInvalidations:
     def test_price_invalidation_fires(self):
         tid = theses.create_thesis(

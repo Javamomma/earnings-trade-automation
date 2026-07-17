@@ -118,10 +118,24 @@ def _connect() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(path)
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         yield conn
         conn.commit()
     finally:
         conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Additive column migrations. CREATE TABLE IF NOT EXISTS doesn't
+    alter existing tables, so late-added columns land here."""
+    cur = conn.execute("PRAGMA table_info(proposals)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "agent_analysis" not in cols:
+        conn.execute("ALTER TABLE proposals ADD COLUMN agent_analysis TEXT")
+    if "agent_stance" not in cols:
+        # 'endorse' | 'caution' | 'oppose' | NULL — the model's opinion,
+        # never a status change. Status stays human-owned.
+        conn.execute("ALTER TABLE proposals ADD COLUMN agent_stance TEXT")
 
 
 def record_brief_run(
