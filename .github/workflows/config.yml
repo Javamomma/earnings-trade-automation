@@ -11,14 +11,48 @@ on:
     - cron: '35 19 * * 1-5'   # 15:35 ET during EST
     - cron: '35 20 * * 1-5'   # 15:35 ET during EDT
   workflow_dispatch:
+  push:
+    paths:
+      - '*.py'
+      - 'requirements.txt'
+      - '.github/workflows/config.yml'
+  pull_request:
+    paths:
+      - '*.py'
+      - 'requirements.txt'
 
 # Never let two runs race against the same broker account.
 concurrency:
-  group: earnings-trade-automation
+  group: earnings-trade-automation-${{ github.event_name == 'schedule' && 'sched' || github.run_id }}
   cancel-in-progress: false
 
 jobs:
+  # Push/PR-time smoke test: a broken dependency pin previously hid for
+  # months because import errors only surfaced on in-market-window
+  # scheduled runs (out-of-window runs exit at the bash guard before
+  # Python starts). This job imports every module on every code push.
+  imports:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Import smoke test
+        run: |
+          python -c "import trade_workflow, automation, alpaca_integration, config, log"
+          echo "All modules import cleanly."
+
   run:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
