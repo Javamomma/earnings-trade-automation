@@ -169,3 +169,9 @@ poetry.toml
 
 # LSP config files
 pyrightconfig.json
+
+# Local state — never commit trade history to version control.
+trades.db
+trades.db-journal
+*.sqlite
+*.sqlite-journal
