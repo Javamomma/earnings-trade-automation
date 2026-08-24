@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Sunday brief + weekly deep evaluation, Sundays 21:00. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.trading-agent.weekly</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>bin/weekly.sh &gt;&gt; data/cron.log 2&gt;&amp;1</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOURUSER/trading-agent</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/YOURUSER/trading-agent/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>0</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+</dict>
+</plist>

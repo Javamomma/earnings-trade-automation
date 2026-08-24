@@ -149,7 +149,20 @@ def _render_hit_rate(stats: list[dict]) -> str:
     return "\n".join(rows)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate the Sunday brief.")
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Render to stdout only: no report file, no journal writes, "
+             "no proposals, no outcome recording, no Discord.",
+    )
+    args = parser.parse_args(argv)
+    # In dry-run mode every journal write becomes a no-op; the render
+    # path is otherwise identical so formatting can be previewed safely.
+    _propose = (lambda *a, **k: None) if args.dry_run else propose
+
     today = date.today()
     portfolio = load_portfolio()
     zones = load_buy_zones()
@@ -176,7 +189,7 @@ def main() -> int:
     checks = evaluate_zones(zones)
     bz_md, fired = _render_buy_zone_section(checks)
     for c in fired:
-        propose(
+        _propose(
             ticker=c.zone.ticker,
             kind="buy_zone_hit",
             rationale=(
@@ -204,7 +217,7 @@ def main() -> int:
     income_md = _render_income_section(ideas)
     for kind in ("csp", "cc"):
         for i in ideas[kind][:3]:
-            propose(
+            _propose(
                 ticker=i.ticker, kind=kind,
                 rationale=f"{('CSP' if kind=='csp' else 'CC')} {i.strike}@{i.expiry}: {i.rationale}",
                 structured={
@@ -235,7 +248,7 @@ def main() -> int:
             for p in sec.added[:3]:
                 block.append(f"  - + {p[:220]}{'…' if len(p) > 220 else ''}")
         filings_md_blocks.append("\n".join(block))
-        propose(
+        _propose(
             ticker=h.ticker, kind="filings_delta",
             rationale=f"{d.latest.form} filed {d.latest.filed}: material section changes detected.",
             structured={
@@ -253,7 +266,7 @@ def main() -> int:
         rows = ["| Thesis | Ticker | Direction | Reason |", "| ---:| --- | --- | --- |"]
         for t, reason in invalidation_hits:
             rows.append(f"| #{t.id} | **{t.ticker}** | {t.direction} | {reason} |")
-            propose(
+            _propose(
                 ticker=t.ticker, kind="thesis_invalidation",
                 rationale=f"Thesis #{t.id} invalidation criterion fired: {reason}",
                 structured={"thesis_id": t.id, "direction": t.direction},
@@ -267,7 +280,8 @@ def main() -> int:
         )
 
     # 6) Outcome scoring
-    persist(measure_theses())
+    if not args.dry_run:
+        persist(measure_theses())
     hr_md = _render_hit_rate(hit_rate_summary())
 
     # 7) Open proposals
@@ -288,6 +302,11 @@ def main() -> int:
         "## 7. Open proposals", proposals_md,
     ]
     body = "\n".join(body_parts) + "\n"
+
+    if args.dry_run:
+        print(body)
+        log.info("Dry run complete: nothing written, nothing sent.")
+        return 0
 
     out_dir = SETTINGS.reports_path() / "weekly"
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -108,15 +108,29 @@ def filter_for_render(wl: Watchlists, lines: list[TickerLine]) -> list[TickerLin
     return out
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate the morning brief.")
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Render to stdout only: no report file, no journal writes, "
+             "no proposals, no Discord. For iterating on format/config.",
+    )
+    args = parser.parse_args(argv)
+
     today = date.today()
-    log.info("Generating brief for %s", today)
+    log.info("Generating brief for %s%s", today, " (dry run)" if args.dry_run else "")
 
     wl = load_watchlists()
     all_lines = build_lines(wl)
     visible = filter_for_render(wl, all_lines)
 
     body = render_brief(today, visible)
+    if args.dry_run:
+        print(body)
+        log.info("Dry run complete: nothing written, nothing sent.")
+        return 0
     path = write_brief(today, body)
     log.info("Wrote %s", path)
 

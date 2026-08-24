@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Nightly: outcome scoring (the feedback loop) + journal backup, 22:30. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.trading-agent.nightly</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>PYTHONPATH=. python -m src.outcomes &gt;&gt; data/cron.log 2&gt;&amp;1 &amp;&amp; bin/backup.sh &gt;&gt; data/cron.log 2&gt;&amp;1</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOURUSER/trading-agent</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/YOURUSER/trading-agent/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+</dict>
+</plist>

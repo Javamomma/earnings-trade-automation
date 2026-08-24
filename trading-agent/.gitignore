@@ -4,6 +4,7 @@
 data/*.db
 data/*.db-journal
 data/cron.log
+data/backups/
 
 # Generated reports — track structure with .gitkeep, ignore contents.
 reports/daily/*.md

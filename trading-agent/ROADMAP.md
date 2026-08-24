@@ -105,20 +105,20 @@ share count (anti-dilution), stable operating margins, low leverage.
 Run monthly to refresh the watchlist that feeds buy-zones and
 option-income.
 
-## Phase 9 — Ops hardening (in progress)
+## Phase 9 — Ops hardening ✅ shipped (one item deferred)
 
-Done:
-- `proposals` CLI for review workflow.
-- Tests isolate the SQLite journal in tmp_path.
-
-To do:
-- [ ] Pi watchdog: alert if today's brief is missing.
-- [ ] launchd plists for the Mac mini (survives reboots cleanly).
-- [ ] Nightly backup of `journal.db` to `data/backups/`, rotate 30.
-- [ ] `--dry-run` flag on briefs that suppresses Discord and journal
-      writes.
-- [ ] On-disk HTTP cache (requests-cache) for EDGAR + Reddit so repeat
-      runs within an hour don't re-hit upstream.
+- [x] `proposals` CLI for the review workflow; annotate for the agent.
+- [x] Pi watchdog (`bin/watchdog.py`): stdlib-only, copyable to the
+      Pi standalone; local or `--ssh user@mac-mini` mode; silent when
+      healthy, Discord alert when the day's brief is missing.
+- [x] launchd plists (`ops/launchd/*.plist`) for daily / weekly /
+      nightly — survives reboots, runs missed jobs on wake.
+- [x] Nightly journal backup (`bin/backup.sh`): `sqlite3 .backup` (no
+      torn copies), rotates at 30.
+- [x] `--dry-run` on both briefs: render to stdout, zero journal
+      writes, zero proposals, zero Discord — safe format iteration.
+- [ ] On-disk HTTP cache (requests-cache) for EDGAR + Reddit —
+      deferred until rate limits actually bite; adds a dependency.
 
 ## Phase 10 — Calibration (continuous)
 
